@@ -1,207 +1,230 @@
 # Asistente Virtual Inteligente de la Secretaría de Educación
 
 Motor de consulta documental institucional basado en RAG (Retrieval-Augmented
-Generation). Permite preguntar en lenguaje natural sobre normativa y documentación
-oficial (resoluciones, circulares, decretos, protocolos, etc.) y obtener respuestas
-fundamentadas exclusivamente en los documentos cargados, con sus fuentes citadas.
+Generation). Permite a rectores, coordinadores, docentes y funcionarios
+consultar normativa y documentación oficial en lenguaje natural, con
+respuestas trazables a sus fuentes y sin inventar información.
 
-**Principio fundamental**: el sistema nunca inventa normativa. Si no hay fragmentos
-recuperados con suficiente similitud, responde explícitamente que no tiene información
-suficiente en lugar de generar una respuesta (ver `backend/app/services/llm_provider.py`).
+> **Estado del proyecto:** MVP funcional. El pipeline completo (carga →
+> extracción → OCR si aplica → chunking → embeddings → indexación →
+> recuperación → generación fundamentada → fuentes) está implementado y
+> probado. Ver "Limitaciones conocidas" antes de llevarlo a producción.
 
-## Estado de este esqueleto
+## Principio fundamental
 
-Este es el andamiaje completo del sistema descrito en el spec: la arquitectura, los
-modelos de datos, el pipeline RAG de punta a punta y las pantallas principales están
-implementados y funcionan entre sí. Algunas partes quedan como puntos de extensión
-señalados en el código (buscar `NotImplementedError` y comentarios "esqueleto"/"TODO").
+**La IA no debe inventar, completar, asumir ni especular información
+normativa.** Si no hay fragmentos institucionales suficientemente
+relacionados con la pregunta, el sistema responde:
 
-**Implementado y funcional:**
-- Carga de documentos (PDF/DOCX/TXT) → extracción de texto → chunking → embeddings →
-  almacenamiento vectorial (pgvector).
-- Consulta en lenguaje natural → búsqueda semántica → generación de respuesta con
-  fuentes citadas (documento, número, año, página, estado de vigencia).
-- Salvaguarda anti-alucinación: sin fragmentos relevantes, respuesta estándar de "no
-  encontré información suficiente"; nunca se inventa contenido normativo.
-- Control de vigencia (vigente/derogado/reemplazado/modificado/en revisión/desconocido)
-  y aviso cuando la respuesta mezcla documentos con distinto estado o vigencia.
-- Panel administrativo: carga y gestión de documentos, cambio de estado de vigencia,
-  estadísticas (documentos, consultas, tiempo promedio, satisfacción).
-- Auditoría: cada consulta registra usuario, pregunta, fragmentos recuperados,
-  respuesta, modelo usado y tiempo de respuesta (`/api/admin/audit`).
-- Proveedores de IA intercambiables por configuración, sin código acoplado a un solo
-  proveedor (ver "Proveedores de IA" abajo).
+> "No encontré información suficiente en la documentación institucional
+> disponible para responder esta consulta con seguridad..."
 
-**Pendiente / puntos de extensión explícitos:**
-- **OCR** para PDFs escaneados (`app/services/ingestion.py::run_ocr` — hoy se detecta y
-  se marca el documento como error, pero no se procesa).
-- **Autenticación real** (login, roles rector/coordinador/docente/admin). El modelo
-  `User` y el campo `user_id` en auditoría ya existen; falta la capa de login/JWT.
-  Todos los endpoints están abiertos por ahora.
-- **Migraciones con Alembic** (hoy las tablas se crean automáticamente al iniciar; hay
-  que introducir migraciones versionadas antes de producción).
-- **Cola de tareas en segundo plano** para indexar documentos grandes sin bloquear la
-  respuesta HTTP (hoy la indexación es síncrona).
-- **Detección de conflictos más fina** entre disposiciones (hoy se avisa cuando hay
-  fragmentos de documentos con distinto estado de vigencia; un análisis semántico más
-  profundo de contradicciones queda para una siguiente iteración).
-- **Article/numeral/section por chunk**: los campos existen en el modelo pero la
-  extracción automática de "artículo X" / "numeral Y" desde el texto aún no está
-  implementada (hoy solo se detecta la página).
+Este guardrail vive en un único punto del código
+(`backend/rag/generator.py::responder_pregunta`) y está cubierto por
+pruebas automáticas en `tests/test_generator_guardrail.py`.
 
 ## Arquitectura
 
 ```
-Usuario → Pregunta → Normalización → Embedding → Búsqueda semántica (pgvector)
-        → Fragmentos relevantes → Detección de vigencia/conflictos → LLM → Respuesta + Fuentes
+Usuario → Pregunta → Embedding de la consulta → Búsqueda vectorial
+        → Priorización por vigencia → ¿Similitud suficiente?
+             │ no                          │ sí
+             ▼                             ▼
+   "Información insuficiente"    LLM (solo con los fragmentos) → Respuesta + Fuentes
 ```
 
-- **Frontend**: React + TypeScript + Vite + Tailwind CSS (`frontend/`).
-- **Backend**: Python + FastAPI, arquitectura modular por routers/servicios/modelos
-  (`backend/`).
-- **Base de datos**: PostgreSQL + pgvector (usuarios, documentos, fragmentos con
-  embeddings, categorías, interacciones/auditoría).
+- **Frontend:** React + TypeScript + Vite + Tailwind CSS.
+- **Backend:** FastAPI (Python), arquitectura modular por capas.
+- **Base de datos:** PostgreSQL + pgvector en producción; SQLite + FAISS
+  local en desarrollo (mismo código, backend intercambiable por variable
+  de entorno).
+- **IA:** capa de proveedor desacoplada — OpenAI, Anthropic o un
+  `MockProvider` de demostración, sin acoplar el sistema a uno solo.
 
-## Proveedores de IA (pensado para poder empezar gratis)
+### Estructura del proyecto
 
-Configurables por variables de entorno, sin tocar código:
-
-- **Embeddings** (`EMBEDDING_PROVIDER`): `local` (por defecto) usa
-  `sentence-transformers` corriendo en tu propia máquina — gratis, sin API key.
-- **LLM** (`LLM_PROVIDER`): `extractive` (por defecto) no llama a ningún proveedor
-  externo — ensambla la respuesta directamente desde los fragmentos recuperados, costo
-  cero. `anthropic` activa respuestas generativas vía la API de Anthropic (requiere
-  `ANTHROPIC_API_KEY`).
-
-Cuando tengas tus documentos cargados, la app ya es utilizable en modo 100% gratuito;
-activar un LLM generativo es un cambio de una variable de entorno.
-
-### Vincular con Claude (API de Anthropic)
-
-Importante: **no es tu cuenta de claude.ai** (esa es una suscripción de consumidor sin
-acceso por API). Es una API key aparte, con facturación por uso:
-
-1. Entrá a [console.anthropic.com](https://console.anthropic.com), creá una cuenta/organización y generá una API key.
-2. En tu `.env` (raíz del proyecto, para Docker) poné:
-   ```
-   ANTHROPIC_API_KEY=sk-ant-...
-   ```
-3. En `backend/.env` (o las variables de entorno del servicio `backend` en
-   `docker-compose.yml`) poné `LLM_PROVIDER=anthropic`.
-4. Reiniciá el backend (`docker compose up -d --build backend`). A partir de ahí, cada
-   consulta genera la respuesta con Claude en vez del modo extractivo.
-
-## Carga automática de documentos desde Google Drive (opcional)
-
-En vez de subir cada documento manualmente desde el panel administrativo, podés
-sincronizar una carpeta de Google Drive: el backend la revisa (manualmente con el botón
-"Sincronizar ahora", o automáticamente cada `DRIVE_SYNC_INTERVAL_MINUTES`) y descarga e
-indexa los archivos nuevos o modificados.
-
-**Configuración (una sola vez):**
-
-1. En [Google Cloud Console](https://console.cloud.google.com/), creá un proyecto (o
-   usá uno existente) y habilitá la **Google Drive API**.
-2. Creá una **cuenta de servicio** (IAM y administración → Cuentas de servicio) y
-   generale una clave en formato JSON — se descarga un archivo.
-3. Abrí ese JSON, copiá el `client_email` (algo como
-   `nombre@proyecto.iam.gserviceaccount.com`), y **compartí la carpeta de Drive** con
-   ese correo (permiso de Lector alcanza).
-4. Tomá el ID de la carpeta desde la URL de Drive:
-   `https://drive.google.com/drive/folders/`**`ESTE_ES_EL_ID`**.
-5. En tu `.env` (raíz del proyecto) poné:
-   ```
-   GOOGLE_DRIVE_FOLDER_ID=el-id-de-la-carpeta
-   GOOGLE_SERVICE_ACCOUNT_JSON={"type":"service_account", ... todo el contenido del JSON en una sola línea ...}
-   DRIVE_SYNC_INTERVAL_MINUTES=30
-   ```
-6. `docker compose up -d --build`. Con `GOOGLE_DRIVE_FOLDER_ID` configurado, la
-   sincronización automática arranca sola cada `DRIVE_SYNC_INTERVAL_MINUTES`; también
-   podés dispararla en cualquier momento con el botón "Sincronizar ahora" en `/admin`.
-
-**Formatos soportados desde Drive:** PDF, DOCX, TXT, y Documentos de Google (se
-exportan a PDF automáticamente). Hojas de cálculo, presentaciones y otros formatos se
-omiten por ahora (quedan contados como "omitidos" en el resultado de la sincronización).
-
-## Puesta en marcha (opción recomendada: todo en Docker)
-
-No hace falta instalar Python, Node ni ninguna dependencia manualmente — solo
-[Docker Desktop](https://www.docker.com/products/docker-desktop/). Todo lo demás
-(base de datos, backend, frontend) queda empaquetado y se levanta con un comando:
-
-```bash
-docker compose up -d --build
+```
+/frontend                  React + TS + Tailwind
+/backend
+  /api/routes               Endpoints (auth, documents, chat, admin)
+  /core                      Configuración (variables de entorno)
+  /models                    Modelos SQLAlchemy
+  /services                  Orquestación del pipeline de ingestión
+  /rag                       Chunking, retrieval, generación, guardrail
+  /documents                 Extracción de texto y OCR
+  /embeddings                Proveedores de embeddings
+  /database                  Sesión de base de datos
+  /auth                      JWT, hashing, control de roles
+  /utils                     Scripts de utilidad (crear admin, etc.)
+/database                   Migración SQL con pgvector (producción)
+/tests                      Pruebas automatizadas (pytest)
+/.env.example
+/docker-compose.yml
 ```
 
-- App: `http://localhost:5173`
-- API: `http://localhost:8000` (docs interactivas en `/docs`)
+## Tecnologías y por qué
 
-La primera vez tarda más porque descarga las imágenes base y el modelo de embeddings
-(~80 MB); las siguientes veces arranca rápido (queda todo cacheado en volúmenes). Para
-apagarlo: `docker compose down` (los datos y documentos cargados se conservan; para
-borrarlos también, `docker compose down -v`).
+| Capa | Elección | Motivo |
+|---|---|---|
+| Embeddings por defecto | `sentence-transformers` (local) | No requiere enviar documentos normativos a un proveedor externo ni claves API para operar. |
+| Vector store dev | FAISS local | Cero infraestructura adicional para probar el sistema. |
+| Vector store prod | PostgreSQL + pgvector | Una sola base de datos para todo (sin operar un vector DB aparte). |
+| LLM | Abstracto (OpenAI/Anthropic/mock) | Evita acoplar la arquitectura RAG a un proveedor específico (sección 23 del diseño). |
 
-Para activar respuestas generativas con Claude en vez del modo extractivo gratuito,
-creá un archivo `.env` en la raíz del proyecto con `ANTHROPIC_API_KEY=tu-clave` antes
-de levantar el stack.
+## Instalación
 
-### Alternativa: correrlo sin Docker (requiere Python y Node instalados)
+### Requisitos
 
-<details>
-<summary>Ver pasos manuales</summary>
+- Python 3.11+
+- Node.js 20+
+- Docker y Docker Compose (para el stack de producción con Postgres)
+- Para OCR: `tesseract-ocr` y `poppler-utils` instalados en el sistema
+  (ya incluidos en `backend/Dockerfile`)
 
-**1. Base de datos**
+### Desarrollo local (sin Docker, con SQLite + FAISS)
+
 ```bash
-docker compose up -d db
-```
-
-**2. Backend**
-```bash
-cd backend
-python3 -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
+# Backend
 cp .env.example .env
-python -m scripts.seed_categories
-uvicorn app.main:app --reload
-```
+cd backend
+python -m venv venv && source venv/bin/activate
+pip install -r requirements.txt
+python -m backend.utils.create_admin admin@ejemplo.gov.co "ClaveSegura123!" "Nombre Apellido"
+uvicorn backend.main:app --reload
 
-**3. Frontend**
-```bash
+# Frontend (en otra terminal)
 cd frontend
 npm install
 npm run dev
 ```
 
-</details>
+La app queda disponible en `http://localhost:5173` (frontend) y
+`http://localhost:8000/docs` (documentación interactiva de la API).
 
-### Cargar documentos
+### Producción (Docker Compose, con PostgreSQL + pgvector)
 
-Desde el panel administrativo (`/admin`) o vía `POST /api/documents` (multipart:
-`file`, `title`, `doc_type`, y metadatos opcionales). El documento se indexa
-automáticamente al subirlo.
+```bash
+cp .env.example .env
+# Editar .env: SECRET_KEY, LLM_PROVIDER, LLM_API_KEY, etc.
+docker compose up --build -d
 
-## Estructura del repositorio
-
+# Crear el primer administrador dentro del contenedor backend
+docker compose exec backend python -m backend.utils.create_admin \
+  admin@secretariaeducacion.gov.co "ClaveSegura123!" "Nombre Apellido"
 ```
-backend/
-  app/
-    models/       # User, Document, DocumentChunk, Category, Interaction (SQLAlchemy)
-    routers/       # documents, query, admin, categories (FastAPI)
-    services/
-      ingestion.py     # extracción de texto (PDF/DOCX/TXT) y chunking
-      embeddings.py     # proveedor de embeddings (intercambiable)
-      llm_provider.py   # proveedor de LLM + prompt de sistema (intercambiable)
-      indexing.py        # orquesta la indexación de un documento
-      rag_pipeline.py    # orquesta una consulta de punta a punta
-      vector_store.py    # búsqueda por similitud en pgvector
-    schemas.py    # contratos Pydantic de la API
-    config.py     # configuración vía variables de entorno
-  scripts/seed_categories.py
-frontend/
-  src/
-    pages/Home.tsx     # pantalla de consulta
-    pages/Admin.tsx    # panel administrativo
-    components/         # QueryBox, AnswerCard, SourceList, History
-    api/client.ts        # cliente HTTP hacia el backend
-docker-compose.yml   # PostgreSQL + pgvector
+
+`docker-compose.yml` levanta:
+- `db`: PostgreSQL con la extensión pgvector, inicializado con
+  `database/001_init_pgvector.sql`.
+- `backend`: la API FastAPI, con `VECTOR_BACKEND=pgvector`.
+- `frontend`: el build de producción servido por nginx, con proxy a `/api`.
+
+## Variables de entorno
+
+Ver `.env.example`. Las más relevantes:
+
+- `DATABASE_URL`: cadena de conexión. SQLite en desarrollo, Postgres en producción.
+- `VECTOR_BACKEND`: `faiss_local` o `pgvector`.
+- `LLM_PROVIDER` / `LLM_API_KEY` / `LLM_MODEL`: proveedor de generación.
+- `EMBEDDING_PROVIDER` / `EMBEDDING_MODEL`: proveedor de embeddings.
+- `MIN_SIMILARITY_THRESHOLD`: umbral por debajo del cual el sistema se
+  niega a responder normativamente (guardrail anti-alucinación).
+- `OCR_ENABLED`: activa el flujo de OCR para PDFs escaneados.
+
+**Nunca** se incluyen claves reales en el repositorio; `.env` está en
+`.gitignore`.
+
+## Procesamiento documental
+
+Al cargar un documento (`POST /api/documents/upload`):
+
+1. Se valida extensión (`.pdf`, `.docx`, `.txt`) y tamaño máximo.
+2. Se extrae el texto. En PDF, si el promedio de caracteres por página es
+   muy bajo, se asume que es un escaneo y se envía a OCR
+   (`pytesseract` + `pdf2image`, idioma español).
+3. Se divide en fragmentos (`chunk_size` configurable, con solapamiento)
+   conservando página de origen y, cuando se detectan, artículo/numeral.
+4. Se generan embeddings y se indexan.
+5. Se guarda el vínculo fragmento ↔ documento (`chunk_id` trazable, p. ej.
+   `RES-2026-0015-P08-C03`).
+
+El estado de procesamiento (`pendiente` / `procesando` / `procesado` /
+`error`) es visible desde el panel administrativo.
+
+## El guardrail anti-alucinación, en detalle
+
+`backend/rag/generator.py::responder_pregunta` es el único punto de
+entrada para generar una respuesta, y aplica, en orden:
+
+1. Si no hay ningún fragmento recuperado → mensaje de información
+   insuficiente, sin llamar al LLM.
+2. Si el mejor fragmento está por debajo de `MIN_SIMILARITY_THRESHOLD` →
+   mensaje de "no se encontraron fuentes suficientemente relacionadas",
+   sin llamar al LLM.
+3. Si hay fragmentos suficientes pero de documentos con distinto estado de
+   vigencia sobre un tema similar → se advierte al LLM explícitamente para
+   que señale la posible contradicción en vez de elegir arbitrariamente.
+4. Solo entonces se llama al LLM, y únicamente con los fragmentos
+   recuperados como contexto (el `system_prompt` en
+   `backend/rag/system_prompt.py` se lo prohíbe explícitamente usar
+   conocimiento externo).
+
+Toda consulta queda auditada en `query_logs`, incluyendo si fue
+respondida o no y qué `chunk_id`s se usaron.
+
+## Ejecución de pruebas
+
+```bash
+cd backend  # o desde la raíz, ajustando PYTHONPATH
+pip install -r requirements.txt
+pytest ../tests -v
 ```
+
+Cobertura actual:
+- **Chunking:** trazabilidad de `chunk_id`, solapamiento, páginas vacías.
+- **Extracción:** validación de archivos, formatos vacíos.
+- **Guardrail anti-alucinación:** sin fragmentos, baja similitud,
+  respuesta con fuentes, detección de contradicción — el núcleo del
+  sistema (sección 25 del diseño original).
+- **Seguridad:** acceso sin token, token inválido, control de roles por
+  endpoint, rechazo de extensiones de archivo no permitidas.
+
+## Datos de prueba (DEMO)
+
+Los documentos institucionales reales **no** se incluyen ni se inventan.
+El campo `es_demo` en `Document` permite marcar explícitamente cualquier
+documento de prueba cargado durante el desarrollo, para no confundirlo
+jamás con normativa real. La interfaz de administración muestra una
+etiqueta "DEMO" junto a estos documentos.
+
+## Limitaciones conocidas (a resolver antes de producción)
+
+- **Borrado en FAISS local:** el backend `faiss_local` no soporta borrado
+  eficiente de vectores por documento; en producción, usar
+  `VECTOR_BACKEND=pgvector`, donde el borrado en cascada sí es nativo.
+- **Migraciones:** el esquema de producción se aplica con un único script
+  SQL (`database/001_init_pgvector.sql`). Para evolucionar el esquema con
+  el tiempo, se recomienda introducir Alembic.
+- **Detección de contradicciones:** la heurística actual
+  (`backend/rag/retriever.py::_detectar_contradiccion`) compara tema y
+  estado de vigencia entre los documentos mejor rankeados; un sistema más
+  maduro añadiría un paso de verificación de entailment/contradicción con
+  el propio LLM antes de responder.
+- **Dimensión del embedding en pgvector:** la migración fija
+  `vector(384)` (modelo multilingüe MiniLM por defecto). Si se cambia
+  `EMBEDDING_MODEL` a uno con otra dimensión, hay que ajustar la columna.
+- **Autenticación:** el MVP no incluye recuperación de contraseña ni
+  expiración/rotación de tokens de refresco; el token de acceso expira
+  según `ACCESS_TOKEN_EXPIRE_MINUTES` y requiere volver a iniciar sesión.
+- **Rate limiting:** no implementado aún sobre los endpoints públicos de
+  autenticación; recomendable antes de exponerlo a internet.
+
+## Próximos pasos sugeridos
+
+1. Cargar un conjunto piloto de documentos reales (marcados como no-DEMO)
+   y calibrar `MIN_SIMILARITY_THRESHOLD` con casos reales del sector.
+2. Añadir búsqueda híbrida (semántica + palabras clave) para mejorar
+   recall en textos con numeración legal exacta (artículos, numerales).
+3. Integrar Alembic para migraciones versionadas.
+4. Añadir panel de auditoría en el frontend (actualmente solo expuesto
+   por API en `GET /api/admin/audit`).

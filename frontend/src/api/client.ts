@@ -1,75 +1,134 @@
-import type { DocumentItem, QueryResponse } from "../types";
+const TOKEN_KEY = "sec_edu_token";
 
-const BASE = "/api";
+export function getToken(): string | null {
+  return localStorage.getItem(TOKEN_KEY);
+}
 
-async function request<T>(path: string, options?: RequestInit): Promise<T> {
-  const res = await fetch(`${BASE}${path}`, options);
-  if (!res.ok) {
-    throw new Error(`Error ${res.status}: ${await res.text()}`);
+export function setToken(token: string) {
+  localStorage.setItem(TOKEN_KEY, token);
+}
+
+export function clearToken() {
+  localStorage.removeItem(TOKEN_KEY);
+}
+
+async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
+  const token = getToken();
+  const headers: Record<string, string> = {
+    ...(options.headers as Record<string, string>),
+  };
+  if (!(options.body instanceof FormData)) {
+    headers["Content-Type"] = "application/json";
   }
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+
+  const res = await fetch(`/api${path}`, { ...options, headers });
+
+  if (res.status === 401) {
+    clearToken();
+    window.location.href = "/login";
+    throw new Error("Sesión expirada");
+  }
+
+  if (!res.ok) {
+    const detail = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(detail.detail || "Error en la solicitud");
+  }
+
   if (res.status === 204) return undefined as T;
   return res.json();
 }
 
-export function askQuestion(question: string): Promise<QueryResponse> {
-  return request<QueryResponse>("/query", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ question }),
-  });
+export const api = {
+  login: (email: string, password: string) =>
+    request<{ access_token: string; role: string }>("/auth/login", {
+      method: "POST",
+      body: JSON.stringify({ email, password }),
+    }),
+  me: () => request<{ id: string; email: string; full_name: string | null; role: string }>("/auth/me"),
+
+  query: (pregunta: string) =>
+    request<ChatResponse>("/chat/query", { method: "POST", body: JSON.stringify({ pregunta }) }),
+  history: () => request<HistoryItem[]>("/chat/history"),
+  rate: (queryLogId: string, valoracion: number) =>
+    request(`/chat/${queryLogId}/rating`, { method: "POST", body: JSON.stringify({ valoracion }) }),
+
+  listDocuments: () => request<DocumentItem[]>("/documents"),
+  uploadDocument: (formData: FormData) =>
+    request<DocumentItem>("/documents/upload", { method: "POST", body: formData }),
+  deleteDocument: (id: string) => request(`/documents/${id}`, { method: "DELETE" }),
+  reprocessDocument: (id: string) => request<DocumentItem>(`/documents/${id}/process`, { method: "POST" }),
+  updateDocumentMetadata: (id: string, payload: Partial<DocumentItem>) =>
+    request<DocumentItem>(`/documents/${id}/metadata`, { method: "PATCH", body: JSON.stringify(payload) }),
+
+  statistics: () => request<Statistics>("/admin/statistics"),
+  audit: () => request<AuditItem[]>("/admin/audit"),
+};
+
+export interface Fuente {
+  documento_nombre: string;
+  tipo_documento: string | null;
+  numero: string | null;
+  anio: number | null;
+  estado_vigencia: string;
+  pagina: number | null;
+  apartado: string | null;
+  articulo: string | null;
+  chunk_id: string;
+  url_original: string | null;
 }
 
-export function sendFeedback(interactionId: string, rating: number) {
-  return request(`/query/${interactionId}/feedback`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ rating }),
-  });
+export interface ChatResponse {
+  respondido: boolean;
+  respuesta: string;
+  fuentes: Fuente[];
+  nivel_confianza: string;
+  posible_contradiccion: boolean;
+  query_log_id: string;
 }
 
-export function listDocuments(): Promise<DocumentItem[]> {
-  return request<DocumentItem[]>("/documents");
+export interface HistoryItem {
+  id: string;
+  pregunta: string;
+  respuesta: string;
+  respondido: boolean;
+  creado_en: string;
 }
 
-export function uploadDocument(form: FormData): Promise<DocumentItem> {
-  return request<DocumentItem>("/documents", { method: "POST", body: form });
+export interface DocumentItem {
+  id: string;
+  nombre: string;
+  tipo_documento: string | null;
+  numero: string | null;
+  anio: number | null;
+  tema: string | null;
+  estado_vigencia: string;
+  estado_procesamiento: string;
+  requirio_ocr: boolean;
+  formato: string;
+  es_demo: boolean;
+  fecha_carga: string;
+  fecha_actualizacion: string;
 }
 
-export function updateDocument(id: string, payload: Record<string, unknown>): Promise<DocumentItem> {
-  return request<DocumentItem>(`/documents/${id}`, {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  });
+export interface Statistics {
+  total_documentos: number;
+  documentos_procesados: number;
+  documentos_pendientes: number;
+  documentos_error: number;
+  total_consultas: number;
+  consultas_sin_respuesta: number;
+  tiempo_promedio_respuesta_ms: number | null;
 }
 
-export function deleteDocument(id: string): Promise<void> {
-  return request<void>(`/documents/${id}`, { method: "DELETE" });
-}
-
-export interface Stats {
-  total_documents: number;
-  documents_indexed: number;
-  documents_pending: number;
-  total_queries: number;
-  queries_today: number;
-  unanswered_queries: number;
-  avg_response_time_ms: number;
-  avg_rating: number | null;
-}
-
-export function getStats(): Promise<Stats> {
-  return request<Stats>("/admin/stats");
-}
-
-export interface DriveSyncResult {
-  total_seen: number;
-  created: number;
-  updated: number;
-  unchanged: number;
-  skipped: number;
-}
-
-export function syncDrive(): Promise<DriveSyncResult> {
-  return request<DriveSyncResult>("/admin/drive/sync", { method: "POST" });
+export interface AuditItem {
+  id: string;
+  usuario_id: string | null;
+  fecha: string;
+  pregunta: string;
+  chunks_recuperados: string[] | null;
+  respondido: boolean;
+  nivel_confianza: string | null;
+  modelo_utilizado: string | null;
+  tiempo_respuesta_ms: number | null;
 }

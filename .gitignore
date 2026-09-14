@@ -1,10 +1,22 @@
+# Entornos y secretos
+.env
+*.db
+venv/
 __pycache__/
 *.pyc
-.env
-.venv/
-*.egg-info/
-node_modules/
-dist/
-*.tsbuildinfo
-uploads/
+
+# Datos y archivos subidos
+/data/
+backend/data/
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+
+# IDE / OS
+.vscode/
+.idea/
 .DS_Store
+
+# Pytest
+.pytest_cache/

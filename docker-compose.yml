@@ -1,46 +1,47 @@
+version: "3.9"
+
 services:
   db:
     image: pgvector/pgvector:pg16
     restart: unless-stopped
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: sec_educacion
+      POSTGRES_USER: secretaria
+      POSTGRES_PASSWORD: secretaria
+      POSTGRES_DB: secretaria_educacion
+    volumes:
+      - db_data:/var/lib/postgresql/data
+      - ./database/001_init_pgvector.sql:/docker-entrypoint-initdb.d/001_init_pgvector.sql
     ports:
       - "5432:5432"
-    volumes:
-      - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      test: ["CMD-SHELL", "pg_isready -U secretaria"]
       interval: 5s
       timeout: 5s
       retries: 10
 
   backend:
-    build: ./backend
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
     restart: unless-stopped
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+psycopg://secretaria:secretaria@db:5432/secretaria_educacion
+      VECTOR_BACKEND: pgvector
+      UPLOAD_DIR: /data/uploads
+      VECTOR_INDEX_PATH: /data/faiss_index
+    volumes:
+      - documents_data:/data/uploads
     depends_on:
       db:
         condition: service_healthy
-    environment:
-      DATABASE_URL: postgresql+psycopg2://postgres:postgres@db:5432/sec_educacion
-      EMBEDDING_PROVIDER: local
-      LLM_PROVIDER: extractive
-      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
-      ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-sonnet-5}
-      UPLOAD_DIR: /app/uploads
-      CORS_ORIGINS: http://localhost:5173
-      GOOGLE_DRIVE_FOLDER_ID: ${GOOGLE_DRIVE_FOLDER_ID:-}
-      GOOGLE_SERVICE_ACCOUNT_JSON: ${GOOGLE_SERVICE_ACCOUNT_JSON:-}
-      DRIVE_SYNC_INTERVAL_MINUTES: ${DRIVE_SYNC_INTERVAL_MINUTES:-30}
-    volumes:
-      - uploads:/app/uploads
-      - hf_cache:/root/.cache/huggingface
     ports:
       - "8000:8000"
 
   frontend:
-    build: ./frontend
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
     restart: unless-stopped
     depends_on:
       - backend
@@ -48,6 +49,5 @@ services:
       - "5173:80"
 
 volumes:
-  pgdata:
-  uploads:
-  hf_cache:
+  db_data:
+  documents_data:
