@@ -76,38 +76,58 @@ Configurables por variables de entorno, sin tocar código:
 Cuando tengas tus documentos cargados, la app ya es utilizable en modo 100% gratuito;
 activar un LLM generativo es un cambio de una variable de entorno.
 
-## Puesta en marcha
+## Puesta en marcha (opción recomendada: todo en Docker)
 
-### 1. Base de datos
+No hace falta instalar Python, Node ni ninguna dependencia manualmente — solo
+[Docker Desktop](https://www.docker.com/products/docker-desktop/). Todo lo demás
+(base de datos, backend, frontend) queda empaquetado y se levanta con un comando:
 
 ```bash
-docker compose up -d
+docker compose up -d --build
 ```
 
-### 2. Backend
+- App: `http://localhost:5173`
+- API: `http://localhost:8000` (docs interactivas en `/docs`)
 
+La primera vez tarda más porque descarga las imágenes base y el modelo de embeddings
+(~80 MB); las siguientes veces arranca rápido (queda todo cacheado en volúmenes). Para
+apagarlo: `docker compose down` (los datos y documentos cargados se conservan; para
+borrarlos también, `docker compose down -v`).
+
+Para activar respuestas generativas con Claude en vez del modo extractivo gratuito,
+creá un archivo `.env` en la raíz del proyecto con `ANTHROPIC_API_KEY=tu-clave` antes
+de levantar el stack.
+
+### Alternativa: correrlo sin Docker (requiere Python y Node instalados)
+
+<details>
+<summary>Ver pasos manuales</summary>
+
+**1. Base de datos**
+```bash
+docker compose up -d db
+```
+
+**2. Backend**
 ```bash
 cd backend
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env
-python -m scripts.seed_categories   # carga las categorías temáticas por defecto
+python -m scripts.seed_categories
 uvicorn app.main:app --reload
 ```
 
-API disponible en `http://localhost:8000` (docs interactivas en `/docs`).
-
-### 3. Frontend
-
+**3. Frontend**
 ```bash
 cd frontend
 npm install
 npm run dev
 ```
 
-App disponible en `http://localhost:5173` (proxy configurado hacia el backend).
+</details>
 
-### 4. Cargar documentos
+### Cargar documentos
 
 Desde el panel administrativo (`/admin`) o vía `POST /api/documents` (multipart:
 `file`, `title`, `doc_type`, y metadatos opcionales). El documento se indexa
