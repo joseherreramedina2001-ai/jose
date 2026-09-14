@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+.env
+.venv/
+*.egg-info/
+node_modules/
+dist/
+*.tsbuildinfo
+uploads/
+.DS_Store
