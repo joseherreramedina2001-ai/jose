@@ -76,6 +76,53 @@ Configurables por variables de entorno, sin tocar código:
 Cuando tengas tus documentos cargados, la app ya es utilizable en modo 100% gratuito;
 activar un LLM generativo es un cambio de una variable de entorno.
 
+### Vincular con Claude (API de Anthropic)
+
+Importante: **no es tu cuenta de claude.ai** (esa es una suscripción de consumidor sin
+acceso por API). Es una API key aparte, con facturación por uso:
+
+1. Entrá a [console.anthropic.com](https://console.anthropic.com), creá una cuenta/organización y generá una API key.
+2. En tu `.env` (raíz del proyecto, para Docker) poné:
+   ```
+   ANTHROPIC_API_KEY=sk-ant-...
+   ```
+3. En `backend/.env` (o las variables de entorno del servicio `backend` en
+   `docker-compose.yml`) poné `LLM_PROVIDER=anthropic`.
+4. Reiniciá el backend (`docker compose up -d --build backend`). A partir de ahí, cada
+   consulta genera la respuesta con Claude en vez del modo extractivo.
+
+## Carga automática de documentos desde Google Drive (opcional)
+
+En vez de subir cada documento manualmente desde el panel administrativo, podés
+sincronizar una carpeta de Google Drive: el backend la revisa (manualmente con el botón
+"Sincronizar ahora", o automáticamente cada `DRIVE_SYNC_INTERVAL_MINUTES`) y descarga e
+indexa los archivos nuevos o modificados.
+
+**Configuración (una sola vez):**
+
+1. En [Google Cloud Console](https://console.cloud.google.com/), creá un proyecto (o
+   usá uno existente) y habilitá la **Google Drive API**.
+2. Creá una **cuenta de servicio** (IAM y administración → Cuentas de servicio) y
+   generale una clave en formato JSON — se descarga un archivo.
+3. Abrí ese JSON, copiá el `client_email` (algo como
+   `nombre@proyecto.iam.gserviceaccount.com`), y **compartí la carpeta de Drive** con
+   ese correo (permiso de Lector alcanza).
+4. Tomá el ID de la carpeta desde la URL de Drive:
+   `https://drive.google.com/drive/folders/`**`ESTE_ES_EL_ID`**.
+5. En tu `.env` (raíz del proyecto) poné:
+   ```
+   GOOGLE_DRIVE_FOLDER_ID=el-id-de-la-carpeta
+   GOOGLE_SERVICE_ACCOUNT_JSON={"type":"service_account", ... todo el contenido del JSON en una sola línea ...}
+   DRIVE_SYNC_INTERVAL_MINUTES=30
+   ```
+6. `docker compose up -d --build`. Con `GOOGLE_DRIVE_FOLDER_ID` configurado, la
+   sincronización automática arranca sola cada `DRIVE_SYNC_INTERVAL_MINUTES`; también
+   podés dispararla en cualquier momento con el botón "Sincronizar ahora" en `/admin`.
+
+**Formatos soportados desde Drive:** PDF, DOCX, TXT, y Documentos de Google (se
+exportan a PDF automáticamente). Hojas de cálculo, presentaciones y otros formatos se
+omiten por ahora (quedan contados como "omitidos" en el resultado de la sincronización).
+
 ## Puesta en marcha (opción recomendada: todo en Docker)
 
 No hace falta instalar Python, Node ni ninguna dependencia manualmente — solo

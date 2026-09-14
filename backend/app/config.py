@@ -22,6 +22,13 @@ class Settings(BaseSettings):
 
     cors_origins: str = "http://localhost:5173"
 
+    # Sincronización con Google Drive (opcional). Requiere una cuenta de servicio de
+    # Google Cloud con la API de Drive habilitada y con acceso de lectura a la carpeta.
+    google_drive_folder_id: str = ""
+    google_service_account_json: str = ""
+    google_application_credentials: str = ""
+    drive_sync_interval_minutes: int = 30  # 0 desactiva la sincronización automática
+
 
 @lru_cache
 def get_settings() -> Settings:

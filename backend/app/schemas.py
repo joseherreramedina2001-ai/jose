@@ -62,6 +62,7 @@ class DocumentOut(BaseModel):
     status: str
     source_url: str | None
     indexing_status: str
+    source: str
     uploaded_at: datetime
     updated_at: datetime
 

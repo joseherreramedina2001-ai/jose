@@ -61,3 +61,15 @@ export interface Stats {
 export function getStats(): Promise<Stats> {
   return request<Stats>("/admin/stats");
 }
+
+export interface DriveSyncResult {
+  total_seen: number;
+  created: number;
+  updated: number;
+  unchanged: number;
+  skipped: number;
+}
+
+export function syncDrive(): Promise<DriveSyncResult> {
+  return request<DriveSyncResult>("/admin/drive/sync", { method: "POST" });
+}

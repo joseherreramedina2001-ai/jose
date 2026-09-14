@@ -36,6 +36,7 @@ export interface DocumentItem {
   status: string;
   source_url: string | null;
   indexing_status: string;
+  source: string;
   uploaded_at: string;
   updated_at: string;
 }

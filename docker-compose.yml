@@ -30,6 +30,9 @@ services:
       ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-sonnet-5}
       UPLOAD_DIR: /app/uploads
       CORS_ORIGINS: http://localhost:5173
+      GOOGLE_DRIVE_FOLDER_ID: ${GOOGLE_DRIVE_FOLDER_ID:-}
+      GOOGLE_SERVICE_ACCOUNT_JSON: ${GOOGLE_SERVICE_ACCOUNT_JSON:-}
+      DRIVE_SYNC_INTERVAL_MINUTES: ${DRIVE_SYNC_INTERVAL_MINUTES:-30}
     volumes:
       - uploads:/app/uploads
       - hf_cache:/root/.cache/huggingface

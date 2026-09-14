@@ -27,6 +27,11 @@ class IndexingStatus(str, enum.Enum):
     ERROR = "error"
 
 
+class DocumentSource(str, enum.Enum):
+    MANUAL = "manual"
+    GOOGLE_DRIVE = "google_drive"
+
+
 class Document(Base):
     __tablename__ = "documents"
 
@@ -44,6 +49,11 @@ class Document(Base):
     source_url: Mapped[str | None] = mapped_column(String(1000), nullable=True)
     file_path: Mapped[str] = mapped_column(String(1000))
     indexing_status: Mapped[IndexingStatus] = mapped_column(Enum(IndexingStatus), default=IndexingStatus.PENDIENTE)
+
+    source: Mapped[DocumentSource] = mapped_column(Enum(DocumentSource), default=DocumentSource.MANUAL)
+    external_id: Mapped[str | None] = mapped_column(String(255), nullable=True)  # id del archivo en Drive
+    external_modified_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
     uploaded_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 

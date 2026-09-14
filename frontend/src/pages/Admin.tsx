@@ -1,5 +1,14 @@
 import { FormEvent, useEffect, useState } from "react";
-import { deleteDocument, getStats, listDocuments, Stats, updateDocument, uploadDocument } from "../api/client";
+import {
+  deleteDocument,
+  DriveSyncResult,
+  getStats,
+  listDocuments,
+  Stats,
+  syncDrive,
+  updateDocument,
+  uploadDocument,
+} from "../api/client";
 import type { DocumentItem } from "../types";
 
 const DOC_TYPES = [
@@ -27,6 +36,9 @@ export default function Admin() {
   const [docType, setDocType] = useState(DOC_TYPES[0]);
   const [file, setFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const [syncResult, setSyncResult] = useState<DriveSyncResult | null>(null);
+  const [syncError, setSyncError] = useState<string | null>(null);
 
   async function refresh() {
     const [docs, s] = await Promise.all([listDocuments(), getStats()]);
@@ -66,6 +78,24 @@ export default function Admin() {
     await refresh();
   }
 
+  async function handleSyncDrive() {
+    setSyncing(true);
+    setSyncError(null);
+    setSyncResult(null);
+    try {
+      const result = await syncDrive();
+      setSyncResult(result);
+      await refresh();
+    } catch {
+      setSyncError(
+        "No se pudo sincronizar con Google Drive. Verifica que GOOGLE_DRIVE_FOLDER_ID y " +
+          "las credenciales estén configuradas en el backend (ver README).",
+      );
+    } finally {
+      setSyncing(false);
+    }
+  }
+
   return (
     <div className="mx-auto max-w-5xl space-y-8 px-6 py-10">
       <h1 className="text-2xl font-semibold text-slate-900">Panel administrativo</h1>
@@ -83,8 +113,30 @@ export default function Admin() {
         </div>
       )}
 
+      <div className="space-y-3 rounded-xl border border-slate-200 bg-white p-6">
+        <h2 className="text-sm font-semibold text-slate-700">Google Drive</h2>
+        <p className="text-sm text-slate-600">
+          Sincroniza los documentos de la carpeta de Google Drive configurada en el backend.
+          Los nuevos o modificados se descargan e indexan automáticamente.
+        </p>
+        <button
+          onClick={handleSyncDrive}
+          disabled={syncing}
+          className="rounded-lg border border-institutional px-4 py-2 text-sm font-medium text-institutional hover:bg-institutional/5 disabled:opacity-50"
+        >
+          {syncing ? "Sincronizando..." : "Sincronizar ahora"}
+        </button>
+        {syncResult && (
+          <p className="text-sm text-emerald-700">
+            {syncResult.created} nuevos, {syncResult.updated} actualizados, {syncResult.unchanged} sin cambios
+            {syncResult.skipped > 0 && `, ${syncResult.skipped} omitidos (formato no soportado)`}.
+          </p>
+        )}
+        {syncError && <p className="text-sm text-red-600">{syncError}</p>}
+      </div>
+
       <form onSubmit={handleUpload} className="space-y-3 rounded-xl border border-slate-200 bg-white p-6">
-        <h2 className="text-sm font-semibold text-slate-700">Cargar documento</h2>
+        <h2 className="text-sm font-semibold text-slate-700">Cargar documento manualmente</h2>
         <input
           value={title}
           onChange={(e) => setTitle(e.target.value)}
@@ -125,6 +177,7 @@ export default function Admin() {
               <tr>
                 <th className="px-4 py-2">Título</th>
                 <th className="px-4 py-2">Tipo</th>
+                <th className="px-4 py-2">Origen</th>
                 <th className="px-4 py-2">Indexación</th>
                 <th className="px-4 py-2">Vigencia</th>
                 <th className="px-4 py-2"></th>
@@ -135,6 +188,7 @@ export default function Admin() {
                 <tr key={d.id} className="border-t border-slate-100">
                   <td className="px-4 py-2">{d.title}</td>
                   <td className="px-4 py-2">{d.doc_type}</td>
+                  <td className="px-4 py-2">{d.source === "google_drive" ? "Google Drive" : "Manual"}</td>
                   <td className="px-4 py-2">{d.indexing_status}</td>
                   <td className="px-4 py-2">
                     <select
